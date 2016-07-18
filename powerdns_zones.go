@@ -32,6 +32,7 @@ type PowerDnsZone struct {
 	Type             string            `json:"type,omitempty"`
 	Dnssec           bool              `json:"dnssec"`
 	Account          string            `json:"account"`
+	TenantId         int               `json:"tenant_id"`
 	Serial           int               `json:"serial"`
 	NotifiedSerial   int               `json:"notified_serial"`
 	Servers          []string          `json:"servers,omitempty"`
@@ -237,6 +238,7 @@ func marshalPowerDnsZonesToZones(pzs []PowerDnsZone) []Zone {
 func marshalPowerDnsZoneToZone(pz PowerDnsZone) Zone {
 	zone := Zone{}
 	zone.Name = pz.Name
+	zone.TenantId = pz.TenantId
 	r := make([]Record, 0, 100)
 
 	for _, pzr := range pz.PowerDnsRecords {

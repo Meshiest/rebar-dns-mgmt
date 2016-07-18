@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/ant0ine/go-json-rest/rest"
+	"github.com/digitalrebar/go-common/multi-tenancy"
 )
 
 /*
@@ -23,8 +24,9 @@ import (
  * update/create and get zone information and records
  */
 type Zone struct {
-	Name    string   `json:"name"`
-	Records []Record `json:"records,omitempty"`
+	Name     string   `json:"name"`
+	Records  []Record `json:"records,omitempty"`
+	TenantId int 			`json:"tenant_id"`
 }
 
 type Record struct {
@@ -55,11 +57,13 @@ func NewZoneEntry() *ZoneEntry {
 
 type ZoneData struct {
 	Entries map[string]*ZoneEntry // name -> entry
+	TenantId int
 }
 
 func NewZoneData() *ZoneData {
-	return &ZoneData{
+	return &ZoneData {
 		Entries: make(map[string]*ZoneEntry),
+		TenantId: -1,
 	}
 }
 
@@ -115,24 +119,38 @@ func (fe *Frontend) GetAllZones(w rest.ResponseWriter, r *rest.Request) {
 		rest.Error(w, err.Error(), err.StatusCode())
 		return
 	}
-	w.WriteJson(data)
+	capMap, _ := multitenancy.NewCapabilityMap(r.Request)
+	zones := make([]Zone, 0, len(data))
+	for _, zone := range(data) {
+		if capMap.HasCapability(zone.TenantId, "ZONE_READ") {
+			zones = append(zones, zone)
+		}
+	}
+	w.WriteJson(zones)
 }
 
 // Get function
 func (fe *Frontend) GetZone(w rest.ResponseWriter, r *rest.Request) {
 	zoneName := r.PathParam("id")
+	capMap, _ := multitenancy.NewCapabilityMap(r.Request)
 
 	data, err := (*fe.Backend).GetZone(fe.ZoneInfo, zoneName)
 	if err != nil {
 		rest.Error(w, err.Error(), err.StatusCode())
 		return
 	}
-	w.WriteJson(data)
+	if capMap.HasCapability(data.TenantId, "ZONE_READ") {
+		w.WriteJson(data)
+	} else {
+		rest.Error(w, "Not Found", http.StatusNotFound)
+	}
+
 }
 
 // Patch function
 func (fe *Frontend) PatchZone(w rest.ResponseWriter, r *rest.Request) {
 	record := Record{}
+	capMap, _ := multitenancy.NewCapabilityMap(r.Request)
 	err := r.DecodeJsonPayload(&record)
 	if err != nil {
 		rest.Error(w, err.Error(), http.StatusInternalServerError)
@@ -143,6 +161,15 @@ func (fe *Frontend) PatchZone(w rest.ResponseWriter, r *rest.Request) {
 
 	fe.ZoneInfo.Lock()
 	zone := fe.ZoneInfo.Zones[zoneName]
+	if zone == nil || zone != nil && !capMap.HasCapability((*zone).TenantId, "ZONE_READ") {
+		rest.Error(w, "Not Found", http.StatusNotFound)
+	}
+
+	if !capMap.HasCapability(zone.TenantId, "ZONE_UPDATE") {
+		rest.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	
 	switch record.ChangeType {
 	case "ADD":
 		// If no zone, create zone
